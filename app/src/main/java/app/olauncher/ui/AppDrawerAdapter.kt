@@ -170,11 +170,11 @@ class AppDrawerAdapter(
     }
 
     private fun appLabelMatches(appLabel: String, charSearch: CharSequence): Boolean {
-        return (appLabel.contains(charSearch.trim(), true) or
+        return (appLabel.startsWith(charSearch.trim(), true) or
                 Normalizer.normalize(appLabel, Normalizer.Form.NFD)
                     .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
                     .replace(Regex("[-_+,. ]"), "")
-                    .contains(charSearch, true))
+                    .startsWith(charSearch, true))
     }
 
     fun setAppList(appsList: MutableList<AppModel>) {

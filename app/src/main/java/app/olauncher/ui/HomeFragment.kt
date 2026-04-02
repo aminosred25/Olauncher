@@ -302,7 +302,7 @@ class HomeFragment : Fragment(), View.OnClickListener, View.OnLongClickListener 
             populateScreenTime()
 
         val homeAppsNum = prefs.homeAppsNum
-        if (homeAppsNum == 0) return
+        if (homeAppsNum == 0) return showAppList(Constants.FLAG_LAUNCH_APP)
 
         binding.homeApp1.visibility = View.VISIBLE
         if (!setHomeAppText(binding.homeApp1, prefs.appName1, prefs.appPackage1, prefs.appUser1, prefs.isShortcut1, prefs.shortcutId1)) {
