@@ -173,9 +173,9 @@ class AppDrawerAdapter(
     }
 
     private fun appLabelMatches(appLabel: String, charSearch: CharSequence): Boolean {
-        if (appLabel.contains(charSearch.trim(), true)) return true
+        if (appLabel.startsWith(charSearch.trim(), true)) return true
         val query = charSearch.normalizeForSearch()
-        return query.isNotEmpty() && appLabel.normalizeForSearch().contains(query, true)
+        return query.isNotEmpty() && appLabel.normalizeForSearch().startsWith(query, true)
     }
 
     private fun CharSequence.normalizeForSearch(): String =
