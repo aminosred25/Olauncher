@@ -1,0 +1,136 @@
+name: Create Release
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      push_rebase:
+        description: 'Force-push rebased branch back to origin'
+        required: false
+        default: 'false'
+
+env:
+  JAVA_VERSION: 17
+  BASE_BRANCH: master
+  UPSTREAM_REPO: ${{ vars.UPSTREAM_REPO || github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+
+      - name: Rebase on upstream/master
+        run: |
+          git remote add upstream https://github.com/${UPSTREAM_REPO}.git
+          git fetch upstream ${BASE_BRANCH}
+          git rebase upstream/${BASE_BRANCH}
+
+      - name: Optionally push rebased branch
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.push_rebase == 'true' }}
+        run: |
+          git push --force-with-lease origin HEAD:${GITHUB_REF#refs/heads/}
+
+      - name: Extract app version
+        id: app_version
+        run: |
+          fetch_version() {
+            local file=$1
+            grep -m1 "versionName" ${file} | sed -E 's/.*versionName[[:space:]]+"([^"]+)"/\1/'
+          }
+          echo "version=$(fetch_version app/build.gradle)" >> $GITHUB_OUTPUT
+
+      - name: Decide if version bumped
+        id: bump
+        run: |
+          tag_name='${{ steps.app_version.outputs.version }}'
+          echo "Current upstream version tag: ${tag_name}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag_name}" > /dev/null 2>&1; then
+            echo "Tag ${tag_name} already exists on origin; skipping build"
+            echo "version_bump=false" >> $GITHUB_OUTPUT
+          else
+            echo "Tag ${tag_name} not found on origin; building"
+            echo "version_bump=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up JDK
+        if: steps.bump.outputs.version_bump == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: Build APK
+        if: steps.bump.outputs.version_bump == 'true'
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Set up Keystore
+        if: steps.bump.outputs.version_bump == 'true'
+        run: |
+          mkdir -p $RUNNER_TEMP/keystores
+          echo "${{ secrets.KEYSTORE_FILE }}" | base64 --decode > $RUNNER_TEMP/keystores/keystore.jks
+          if [ ! -f $RUNNER_TEMP/keystores/keystore.jks ]; then
+            echo "Failed to decode keystore file"
+            exit 1
+          fi
+
+      - name: Sign APK
+        if: steps.bump.outputs.version_bump == 'true'
+        run: |
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -n 1)
+          if [ -z "$BUILD_TOOLS_DIR" ]; then
+            echo "No build-tools found in $ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          APKSIGNER="${BUILD_TOOLS_DIR}apksigner"
+          if [ ! -f "$APKSIGNER" ]; then
+            echo "apksigner not found at $APKSIGNER"
+            exit 1
+          fi
+          if [ ! -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            echo "APK not found at app/build/outputs/apk/release/app-release-unsigned.apk"
+            exit 1
+          fi
+          $APKSIGNER sign \
+            --ks $RUNNER_TEMP/keystores/keystore.jks \
+            --ks-key-alias ${{ secrets.KEY_ALIAS }} \
+            --ks-pass pass:${{ secrets.KEYSTORE_PASSWORD }} \
+            --key-pass pass:${{ secrets.KEY_PASSWORD }} \
+            --out app-release.apk \
+            app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Clean Up Keystore
+        if: steps.bump.outputs.version_bump == 'true'
+        run: |
+          rm -f $RUNNER_TEMP/keystores/keystore.jks
+
+      - name: Create Tag for Manual Trigger
+        if: github.event_name == 'workflow_dispatch' && steps.bump.outputs.version_bump == 'true'
+        run: |
+          TAG=${{ steps.app_version.outputs.version }}
+          git tag ${TAG}
+          git push origin ${TAG}
+
+      - name: Create Release
+        if: steps.bump.outputs.version_bump == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.app_version.outputs.version }}
+          files: app-release.apk

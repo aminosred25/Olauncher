@@ -309,6 +309,11 @@ class AppDrawerFragment : Fragment() {
             }
             findNavController().popBackStack()
         }
+
+        binding.search.setOnLongClickListener {
+            findNavController().navigate(R.id.action_appListFragment_to_settingsFragment2)
+            true
+        }
     }
 
     private fun getRecyclerViewOnScrollListener(): RecyclerView.OnScrollListener {
